@@ -7,13 +7,13 @@ st.title("ジョインバイト日給＋交通費計算")
 
 # 業務区分の定義
 JOB_OPTIONS = {
-    "① 会場整理・グッズ販売・ステージハンド等 (時給1,300/5h保障)": 1,
-    "② ステージ搬入・搬出 (時給1,500/3h保障)": 2,
-    "③ ライブハウス搬入搬出 (時給1,500/3h保障)": 3,
+    "① 会場整理・グッズ販売・ステージハンド等 (時給1,300)": 1,
+    "② ステージ搬入・搬出 (時給1,500)": 2,
+    "③ ライブハウス搬入搬出 (時給1,500)": 3,
     "④ チラシ配布・サンプリング等 (時給1,300)": 4,
     "⑤ EXシアタードリンク業務 (時給1,300)": 5,
     "⑥ 東京グローブ座 (時給1,300)": 6,
-    "⑦ ケータリング・ランナー (時給1,420/5h保障)": 7,
+    "⑦ ケータリング・ランナー (時給1,420)": 7,
 }
 
 # 交通費一覧（2026年4月9日改定版）
@@ -54,12 +54,15 @@ with col1:
 with col2:
     end_time = st.time_input("終了時間", value=datetime.strptime("18:00", "%H:%M").time())
 
+# 保証給設定（デフォルトはオフ＝保証給なし）
+use_guarantee = st.checkbox("保証給（最低保証時間）を適用する", value=False)
+
 # 2. 会場（交通費）の選択
 st.subheader("2. 勤務会場の選択")
 selected_loc_label = st.selectbox("勤務会場 / エリア", list(LOCATION_OPTIONS.keys()))
 transport_fee = LOCATION_OPTIONS[selected_loc_label]
 
-def calculate_wage(job_type, start_t, end_t):
+def calculate_wage(job_type, start_t, end_t, apply_guarantee):
     start_dt = datetime.combine(datetime.today(), start_t)
     end_dt = datetime.combine(datetime.today(), end_t)
     
@@ -74,53 +77,66 @@ def calculate_wage(job_type, start_t, end_t):
     rates = {1: 1300, 2: 1500, 3: 1500, 4: 1300, 5: 1300, 6: 1300, 7: 1420}
     base_rate = rates[job_type]
     
-    if job_type in [1, 7]:
-        guaranteed_h = 5.0
-        base_wage = base_rate * 5.0
-    elif job_type in [2, 3]:
-        guaranteed_h = 3.0
-        base_wage = 5000.0 if job_type == 2 else 4500.0
-    elif job_type == 4:
-        if work_hours <= 3.0:
-            guaranteed_h, base_wage = 3.0, 3900.0
-        elif work_hours <= 4.0:
-            guaranteed_h, base_wage = 4.0, 5200.0
-        else:
-            guaranteed_h, base_wage = 5.0, 6500.0
-    elif job_type == 5:
-        if work_hours <= 3.0:
-            guaranteed_h, base_wage = 3.0, 4000.0
-        elif work_hours <= 3.5:
-            guaranteed_h, base_wage = 3.5, 4550.0
-        elif work_hours <= 4.5:
-            guaranteed_h, base_wage = 4.5, 5850.0
-        else:
-            guaranteed_h, base_wage = 5.0, 6500.0
-    elif job_type == 6:
-        if work_hours <= 3.5:
-            guaranteed_h, base_wage = 3.5, 5300.0
-        elif work_hours <= 4.5:
-            guaranteed_h, base_wage = 4.5, 5850.0
-        else:
-            guaranteed_h, base_wage = 5.0, 6500.0
+    guaranteed_h = 0.0
+    base_wage = 0.0
 
-    # 15分刻みで残業(8h超)・深夜(22-5時)を判定
-    extra_wage = 0.0
+    # 保証給を使う場合のみ適用
+    if apply_guarantee:
+        if job_type in [1, 7]:
+            guaranteed_h = 5.0
+            base_wage = base_rate * 5.0
+        elif job_type in [2, 3]:
+            guaranteed_h = 3.0
+            base_wage = 5000.0 if job_type == 2 else 4500.0
+        elif job_type == 4:
+            if work_hours <= 3.0:
+                guaranteed_h, base_wage = 3.0, 3900.0
+            elif work_hours <= 4.0:
+                guaranteed_h, base_wage = 4.0, 5200.0
+            else:
+                guaranteed_h, base_wage = 5.0, 6500.0
+        elif job_type == 5:
+            if work_hours <= 3.0:
+                guaranteed_h, base_wage = 3.0, 4000.0
+            elif work_hours <= 3.5:
+                guaranteed_h, base_wage = 3.5, 4550.0
+            elif work_hours <= 4.5:
+                guaranteed_h, base_wage = 4.5, 5850.0
+            else:
+                guaranteed_h, base_wage = 5.0, 6500.0
+        elif job_type == 6:
+            if work_hours <= 3.5:
+                guaranteed_h, base_wage = 3.5, 5300.0
+            elif work_hours <= 4.5:
+                guaranteed_h, base_wage = 4.5, 5850.0
+            else:
+                guaranteed_h, base_wage = 5.0, 6500.0
+
+    # 15分刻みで計算
     curr = start_dt
     accumulated_h = 0.0
     step = timedelta(minutes=15)
+    extra_wage = 0.0
     
     while curr < end_dt:
         is_night = (curr.hour >= 22 or curr.hour < 5)
         is_overtime = (accumulated_h >= 8.0)
         
-        if accumulated_h >= guaranteed_h:
-            step_wage = base_rate / 4.0
-            if is_overtime:
-                step_wage += (base_rate * 0.25) / 4.0
-            if is_night:
-                step_wage += (base_rate * 0.25) / 4.0
-            extra_wage += step_wage
+        if apply_guarantee:
+            # 保障時間を超えた分のみ基本時給を加算
+            if accumulated_h >= guaranteed_h:
+                extra_wage += base_rate / 4.0
+        else:
+            # 実働時間分の基本時給を加算
+            extra_wage += base_rate / 4.0
+            
+        # 深夜割増手当 (+25%)
+        if is_night:
+            extra_wage += (base_rate * 0.25) / 4.0
+            
+        # 残業割増手当 (+25%)
+        if is_overtime:
+            extra_wage += (base_rate * 0.25) / 4.0
             
         accumulated_h += 0.25
         curr += step
@@ -130,13 +146,13 @@ def calculate_wage(job_type, start_t, end_t):
 
 st.markdown("---")
 if st.button("日給を計算する", type="primary"):
-    hours, wage_pay = calculate_wage(job_type, start_time, end_time)
+    hours, wage_pay = calculate_wage(job_type, start_time, end_time, use_guarantee)
     if hours is None:
         st.error(wage_pay)
     else:
         total_payment = wage_pay + transport_fee
         
-        st.metric(label="勤務時間（全拘束時間）", value=f"{hours:.2f} 時間")
+        st.metric(label="勤務時間（実労働時間）", value=f"{hours:.2f} 時間")
         
         col_a, col_b = st.columns(2)
         with col_a:
